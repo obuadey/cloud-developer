@@ -1,26 +1,50 @@
 import 'source-map-support/register'
 
-import { APIGatewayProxyEvent, APIGatewayProxyResult, APIGatewayProxyHandler } from 'aws-lambda'
-
-import { createLogger } from '../../utils/logger'
+import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda'
+import * as middy from 'middy'
+import { cors, httpErrorHandler } from 'middy/middlewares'
+import { deleteTodo, getTodo } from '../../businessLogic/todos'
 import { getUserId } from '../utils'
-import { deleteTodo } from '../../helpers/todos'
+import { createLogger } from '../../utils/logger'
 
 const logger = createLogger('deleteTodo')
 
-export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  logger.info('Processing deleteTodo event', { event })
+export const handler = middy(
+  async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+    logger.info('Attempting to delete TODO', event)
+    const todoId = event.pathParameters.todoId
+    const userId = getUserId(event)
+    const todo = await getTodo(todoId,userId)
 
-  const userId = getUserId(event)
-  const todoId = event.pathParameters.todoId
+    if(!todo){
+      logger.warn('TODO was not found for ' + userId)
+      return {
+        statusCode: 404,
+        body: 'TODO was not found'
+      }
+    }
 
-  await deleteTodo(userId, todoId)
+    if(todo.userId !== userId){
+      logger.warn(`${userId} not authorized to delete TODO`)
+      return {
+        statusCode: 403,
+        body: 'User is not authorized to delete item'
+      }
+    }
 
-  return {
-    statusCode: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*'
-    },
-    body: ''
+    await deleteTodo(todoId,userId)
+    
+    return {
+      statusCode: 204,
+      body: ''
+    }
   }
-}
+)
+
+handler
+  .use(httpErrorHandler())
+  .use(
+    cors({
+      credentials: true
+    })
+  )
